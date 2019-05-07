@@ -515,7 +515,7 @@ void process(int Nk, int Tk, int CacheSize)
             __assume_aligned(row_index, 64);
             */
 
-            for(int iter = 0; iter < 10; iter++)
+            for(int iter = 0; iter < 1; iter++)
             {
                 cacheFlush(X, Y);
                 gettimeofday(&starttime, NULL);
@@ -1028,6 +1028,64 @@ void papi()
 
 }
 
+void initTile(int * &notsmaller, int* & notsmallerweighted)
+{
+	int* dist = new int[nr + 1];
+	for(int i=0; i<=nr ; i++)
+		dist[i] = 0;
+	int i = 0;
+	for(int col=0 ; col < nc ; col++)
+	{
+		int last = -1;
+		while (temp_v[i].col == col)
+		{
+			int row = temp_v[i].row; 
+			dist[row-last-1]++;
+			i++;
+		}
+		dist[nr-last-1]++;
+	}
+
+
+	if (i != ne)
+		printf("correctness fails");
+
+	notsmaller = new int[nr+1];
+	notsmallerweighted = new int[nr + 1];
+
+	notsmaller[nr] = 0;
+	notsmallerweighted[nr] = 0;
+
+	for (int ti=nr-1; ti>0; ti--)
+	{
+		notsmaller[ti] = dist[ti] + notsmaller[ti+1];
+		notsmallerweighted[ti] = ti*dist[ti] + notsmallerweighted[ti+1];
+	}
+
+}
+
+void selectTile(int &Tj, int &Tk, int CacheSize, int Nk, int * notsmaller, int* notsmallerweighted)
+{
+	
+
+	int mink = 32;
+	int minmovement = -1;
+	int minkey = -1;
+	for(int k=mink; k<Nk; k*=2)
+	{
+		int tj = CacheSize/k;
+		int est = ne*3*Nk/k + nc*Nk - notsmaller[tj]*(tj-1) + notsmallerweighted[tj];
+		if(minmovement<0 || est<mink)
+		{
+			mink = est;
+			minkey = k;
+		}
+	}
+
+	Tk = minkey;
+	Tj = CacheSize/Tk;
+}
+
 int main(int argc, char **argv)
 {
     fprintf(stdout,"TTAAGG,%s,",argv[1]);
@@ -1037,11 +1095,14 @@ int main(int argc, char **argv)
     //k=8 to 64
 //    int cache = CACHE;// 65536;
     //SM_WIDTH = 256;
+    int Nk, CacheSize, Tk, Tj; 
+    int* notsmaller, * notsmallerweighted;
     struct timeval starttime, midtime, endtime,timediff;
     double total_time=0.0, avg_time=0.0;
     gettimeofday(&starttime,NULL);
 
     //gen_structure();
+
 
     gettimeofday(&endtime,NULL);
     double elapsed = ((endtime.tv_sec-starttime.tv_sec)*1000000 + endtime.tv_usec-starttime.tv_usec)/1000000.0;
@@ -1058,16 +1119,24 @@ int main(int argc, char **argv)
         papi();
     }
 */
-    SM_K = 1024;
+//    SM_K = 1024;
 
-    int Nk, CacheSize, Tk; 
-    for(Nk = 128; Nk<=1024; Nk *= 8){
-        for(CacheSize = CACHE ; CacheSize <=CACHE ; CacheSize *= 2){
-            for(Tk = Nk ; Tk >= 32 ; Tk/=2){
-                gen_structure(Nk,Tk,CacheSize);
-                process(Nk,Tk,CacheSize);
-            }
-        }
+
+    initTile(notsmaller,notsmallerweighted);
+    CacheSize = CACHE;
+    for(Nk = 128; Nk<=1024; Nk *= 8)
+    {
+    	gettimeofday(&starttime,NULL);
+    	selectTile(Tj,Tk,CacheSize,Nk,notsmaller,notsmallerweighted);
+    	gettimeofday(&endtime,NULL);
+	    double elapsed = ((endtime.tv_sec-starttime.tv_sec)*1000000 + endtime.tv_usec-starttime.tv_usec)/1000000.0;
+	    cout<<"Preprocess overhead "<<" Elapsed: "<<elapsed<<endl;
+	    cout<<"================================STATS================================="<<endl;
+    	gen_structure(Nk,Tk,CacheSize); 
+    	process(Nk,Tk,CacheSize);
+    	SM_K = Nk;
+    	SM_WIDTH = Tj;
+    	papi();
     }
 
 
